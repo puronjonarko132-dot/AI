@@ -1,3 +1,4 @@
+D
 # Jarvas (Advanced Node AI Server)
 
 ## What you get
@@ -55,3 +56,6 @@ curl -X POST "http://localhost:3000/jarvas/ingest" \
 - Set env vars in the host dashboard (don’t upload `.env`)
 # jarvas
 # jarvas
+=======
+# AI
+>>>>>>> e815054b67c481c3b13b64ac2e9375aa596b025e
