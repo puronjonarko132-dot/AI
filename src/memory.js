@@ -1,14 +1,28 @@
 import { config } from "./config.js";
 
+const DEFAULT_STYLE = Object.freeze({
+  roastMode: true,
+  debateMode: true,
+  intensity: 2,
+  persona: "jarvis",
+  responseFormat: "standard",
+  allowProfanity: false,
+  goals: [],
+});
+
 export class MemoryStore {
   constructor() {
-    // sessionId -> { turns: [{role, content, ts}], summary: string }
+    // sessionId -> { turns: [{role, content, ts}], summary: string, styleProfile: object }
     this.sessions = new Map();
   }
 
   get(sessionId) {
     if (!this.sessions.has(sessionId)) {
-      this.sessions.set(sessionId, { turns: [], summary: "" });
+      this.sessions.set(sessionId, {
+        turns: [],
+        summary: "",
+        styleProfile: { ...DEFAULT_STYLE },
+      });
     }
     return this.sessions.get(sessionId);
   }
@@ -21,6 +35,16 @@ export class MemoryStore {
     if (s.turns.length > config.memoryMaxTurns) {
       s.turns.splice(0, s.turns.length - config.memoryMaxTurns);
     }
+  }
+
+  saveStyleProfile(sessionId, style) {
+    const s = this.get(sessionId);
+    s.styleProfile = { ...s.styleProfile, ...style };
+  }
+
+  getStyleProfile(sessionId) {
+    const s = this.get(sessionId);
+    return { ...s.styleProfile };
   }
 
   buildMessages(sessionId) {
