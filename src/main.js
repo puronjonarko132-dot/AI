@@ -17,23 +17,102 @@ const jarvasClient = new OpenAI({ apiKey: config.openaiKey });
 const memory = new MemoryStore();
 const rag = new RAGIndex(jarvasClient);
 
-// Seed starter knowledge (replace via /jarvas/ingest)
 await rag.ingest([
   "Jarvas is a helpful, safe assistant.",
   "Jarvas refuses illegal, harmful, or privacy-invasive requests.",
   "Jarvas answers clearly and concisely unless asked otherwise.",
+  "Jarvas can debate ideas, challenge assumptions, and keep humor playful.",
 ]);
 
-function systemPrompt(contextSnips) {
-  const ctx = contextSnips.length
-    ? contextSnips.map((s) => `- ${s}`).join("\n")
-    : "- (no extra context)";
+function detectLiveOverrides(message, style) {
+  const text = String(message || "").toLowerCase();
+  const out = { ...style };
+
+  if (/no roast|stop roasting|be nice/.test(text)) out.roastMode = false;
+  if (/roast me|go hard|extra savage/.test(text)) out.roastMode = true;
+
+  if (/no debate|don't debate|just answer/.test(text)) out.debateMode = false;
+  if (/debate me|argue with me|push back/.test(text)) out.debateMode = true;
+
+  if (/deep answer|full breakdown/.test(text)) out.responseFormat = "deep";
+  if (/quick answer|tldr/.test(text)) out.responseFormat = "quick";
+
+  return out;
+}
+
+function buildPersonality(style = {}) {
+  const roastMode = style.roastMode !== false;
+  const debateMode = style.debateMode !== false;
+  const intensity = Number(style.intensity || 2);
+  const persona = style.persona || "jarvis";
+  const responseFormat = style.responseFormat || "standard";
+
+  const personaLines = {
+    jarvis: "Persona: elegant, dry-witty, composed, futuristic but warm.",
+    mentor: "Persona: strategic coach, high standards, encouraging pressure.",
+    sparring: "Persona: analytical sparring partner, direct challenge, no fluff.",
+    chill: "Persona: calm, friendly, low-ego, lightly playful.",
+  };
+
+  return [
+    personaLines[persona] || personaLines.jarvis,
+    roastMode
+      ? "Roast mode: enabled. Keep jokes clever, friendly, and non-abusive. Roast decisions, not identity."
+      : "Roast mode: disabled.",
+    debateMode
+      ? "Debate mode: enabled. Challenge weak logic and ask one incisive follow-up when useful."
+      : "Debate mode: disabled.",
+    `Intensity: ${Math.min(Math.max(intensity, 1), 5)} / 5.`,
+    `Response format: ${responseFormat}.`,
+    style.allowProfanity
+      ? "Profanity setting: mirror mild user language only; never abuse."
+      : "Profanity setting: avoid profanity.",
+    style.goals?.length
+      ? `User goals: ${style.goals.map((g) => `"${g}"`).join(", ")}`
+      : "User goals: not provided.",
+  ].join("\n");
+}
+
+function buildResponseProtocol(style) {
+  if (style.responseFormat === "quick") {
+    return [
+      "Output protocol:",
+      "1) One-line verdict.",
+      "2) One strongest counterpoint.",
+      "3) One upgraded action step.",
+    ].join("\n");
+  }
+
+  if (style.responseFormat === "deep") {
+    return [
+      "Output protocol:",
+      "1) Executive take (2-3 lines).",
+      "2) Argument map: claim, assumptions, strongest counter.",
+      "3) Upgrade plan with concrete next steps.",
+      "4) If roast mode on, add one playful roast line at the end.",
+    ].join("\n");
+  }
+
+  return [
+    "Output protocol:",
+    "1) Short answer.",
+    "2) Why.",
+    "3) Better move next.",
+  ].join("\n");
+}
+
+function systemPrompt(contextSnips, style) {
+  const ctx = contextSnips.length ? contextSnips.map((s) => `- ${s}`).join("\n") : "- (no extra context)";
+
   return (
-    `You are ${config.jarvasName}, a helpful and safe AI.\n` +
+    `You are ${config.jarvasName}, a highly capable, safe AI assistant.\n` +
     `Rules:\n` +
     `- Refuse illegal/harmful requests.\n` +
-    `- Keep responses clear, not too long.\n` +
-    `- Use context if relevant; don't invent facts.\n\n` +
+    `- Never produce hate, abuse, doxxing, or targeted harassment.\n` +
+    `- Keep banter consent-based and reversible when user asks.\n` +
+    `- Be honest about uncertainty; do not fabricate facts.\n\n` +
+    `${buildPersonality(style)}\n\n` +
+    `${buildResponseProtocol(style)}\n\n` +
     `Relevant context:\n${ctx}`
   );
 }
@@ -48,7 +127,7 @@ async function maybeSummarize(sessionId) {
       {
         role: "system",
         content:
-          "Summarize the conversation so far in 6-10 bullet points. Keep key preferences, goals, and open tasks.",
+          "Summarize in 6-10 bullets: user preferences, goals, unresolved tasks, and communication style signals.",
       },
       ...msgs,
     ],
@@ -118,6 +197,11 @@ app.post("/jarvas/chat", requireServerKey, rateLimit, async (req, res) => {
 
   const { sessionId, message, stream } = parsed.data;
 
+  const storedStyle = memory.getStyleProfile(sessionId);
+  const requestedStyle = { ...storedStyle, ...parsed.data.style };
+  const effectiveStyle = detectLiveOverrides(message, requestedStyle);
+  memory.saveStyleProfile(sessionId, effectiveStyle);
+
   memory.addTurn(sessionId, "user", message);
   await maybeSummarize(sessionId);
 
@@ -125,12 +209,11 @@ app.post("/jarvas/chat", requireServerKey, rateLimit, async (req, res) => {
   const contextSnips = ragHits.map((h) => h.text);
 
   const baseMessages = [
-    { role: "system", content: systemPrompt(contextSnips) },
+    { role: "system", content: systemPrompt(contextSnips, effectiveStyle) },
     ...memory.buildMessages(sessionId),
   ];
 
   if (stream) {
-    // Simple SSE streaming of final text (clean + reliable)
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
@@ -143,13 +226,20 @@ app.post("/jarvas/chat", requireServerKey, rateLimit, async (req, res) => {
     for (const c of chunks) {
       res.write(`data: ${JSON.stringify({ token: c })}\n\n`);
     }
-    res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
+
+    res.write(
+      `data: ${JSON.stringify({ done: true, style: effectiveStyle })}\n\n`
+    );
     return res.end();
   }
 
   const { finalText } = await runToolLoop(baseMessages);
   memory.addTurn(sessionId, "assistant", finalText);
-  res.json({ assistant: config.jarvasName, reply: finalText });
+  res.json({
+    assistant: config.jarvasName,
+    reply: finalText,
+    style: effectiveStyle,
+  });
 });
 
 app.use((err, req, res, next) => {

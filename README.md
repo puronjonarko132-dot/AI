@@ -1,61 +1,63 @@
-D
 # Jarvas (Advanced Node AI Server)
 
-## What you get
-- `/jarvas/chat` (SSE streaming or JSON)
-- `/jarvas/ingest` (add RAG docs)
-- Session memory + auto-summary
-- Embeddings RAG (in-memory vector index)
-- Tool calling loop (safe tools)
-- API key auth + rate limiting
-- Structured logging (pino)
+A local AI backend with memory, RAG, tool-calling, and a configurable Jarvis-style personality.
 
-## Setup
-1) Copy env:
+## Features
+- `/jarvas/chat` with SSE or JSON
+- `/jarvas/ingest` for custom knowledge
+- Session memory + auto-summary
+- Tool loop with safe local tools
+- Adaptive persona: roast/debate + response depth + live overrides
+- API key auth + rate limiting
+
+## Run on MacBook Air M4
 ```bash
 cp .env.example .env
-```
-2) Edit `.env`:
-- `OPENAI_API_KEY`
-- `SERVER_KEY` (your private server auth key)
-
-3) Install + run:
-```bash
 npm i
 npm start
 ```
 
-## Test
-Non-stream:
+Set in `.env`:
+- `OPENAI_API_KEY`
+- `SERVER_KEY`
+
+## Advanced style controls (`/jarvas/chat`)
+`style` fields:
+- `roastMode` (`true|false`)
+- `debateMode` (`true|false`)
+- `intensity` (`1..5`)
+- `persona` (`jarvis|mentor|sparring|chill`)
+- `responseFormat` (`quick|standard|deep`)
+- `allowProfanity` (`true|false`)
+- `goals` (`string[]` max 8)
+
+### Example request
 ```bash
 curl -X POST "http://localhost:3000/jarvas/chat" \
   -H "Content-Type: application/json" \
   -H "X-Server-Key: change-me" \
-  -d '{"sessionId":"demo","message":"Hello Jarvas","stream":false}'
+  -d '{
+    "sessionId":"demo",
+    "message":"My business plan is perfect. Debate me and roast lightly.",
+    "stream":false,
+    "style": {
+      "roastMode": true,
+      "debateMode": true,
+      "intensity": 3,
+      "persona": "sparring",
+      "responseFormat": "deep",
+      "goals": ["Find weaknesses", "Improve execution plan"]
+    }
+  }'
 ```
 
-Streaming (SSE):
-```bash
-curl -N -X POST "http://localhost:3000/jarvas/chat" \
-  -H "Content-Type: application/json" \
-  -H "X-Server-Key: change-me" \
-  -d '{"sessionId":"demo","message":"Explain gravity in 3 lines","stream":true}'
-```
+## Live override phrases (in plain user message)
+Jarvas can adapt immediately if users type phrases like:
+- `"no roast"`, `"stop roasting"`, `"be nice"`
+- `"debate me"`, `"argue with me"`, `"just answer"`
+- `"quick answer"`, `"deep answer"`
 
-Ingest docs:
-```bash
-curl -X POST "http://localhost:3000/jarvas/ingest" \
-  -H "Content-Type: application/json" \
-  -H "X-Server-Key: change-me" \
-  -d '{"texts":["My custom doc text here","Another doc"]}'
-```
-
-## Deploy
-- Put this repo on GitHub
-- Deploy on Render/Railway/Fly
-- Set env vars in the host dashboard (don’t upload `.env`)
-# jarvas
-# jarvas
-=======
-# AI
->>>>>>> e815054b67c481c3b13b64ac2e9375aa596b025e
+## Safety
+- Banter is kept playful and non-abusive.
+- No hate/harassment/doxxing behavior.
+- If user asks to stop roast/debate, it can switch immediately.
